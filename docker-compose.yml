@@ -1,0 +1,116 @@
+version: "3.9"
+
+# AURA - Autonomous User Response Agent
+# Local dev + production stack. Same compose file deploys to EC2 via infra/ec2/deploy.sh.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: aura-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aura}
+      POSTGRES_USER: ${POSTGRES_USER:-aura}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aura}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aura} -d ${POSTGRES_DB:-aura}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks: [aura-net]
+
+  redis:
+    image: redis:7-alpine
+    container_name: aura-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks: [aura-net]
+
+  core:
+    build:
+      context: ./core
+      dockerfile: Dockerfile
+    container_name: aura-core
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-aura}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-aura}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-aura}
+      AURA_REDIS_HOST: redis
+      AURA_REDIS_PORT: 6379
+      AURA_JWT_SECRET: ${AURA_JWT_SECRET:-change-me-in-production-please-32chars}
+      AURA_GEMINI_API_KEY: ${AURA_GEMINI_API_KEY:-}
+      AURA_GEMINI_FAST_MODEL: ${AURA_GEMINI_FAST_MODEL:-gemini-2.0-flash}
+      AURA_GEMINI_REASONING_MODEL: ${AURA_GEMINI_REASONING_MODEL:-gemini-2.0-pro}
+    ports:
+      - "8080:8080"
+    volumes:
+      - djl-cache:/root/.djl.ai
+    restart: unless-stopped
+    networks: [aura-net]
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: aura-gateway
+    depends_on:
+      - core
+      - redis
+    environment:
+      AURA_GATEWAY_ADDR: ":8081"
+      AURA_CORE_URL: "http://core:8080"
+      AURA_REDIS_ADDR: "redis:6379"
+      AURA_JWT_SECRET: ${AURA_JWT_SECRET:-change-me-in-production-please-32chars}
+      AURA_CORS_ORIGINS: ${AURA_CORS_ORIGINS:-http://localhost:3000}
+      AURA_RATE_LIMIT_RPS: ${AURA_RATE_LIMIT_RPS:-20}
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+    networks: [aura-net]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8081}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8081}
+    container_name: aura-frontend
+    depends_on:
+      - gateway
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8081}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8081}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    networks: [aura-net]
+
+volumes:
+  postgres-data:
+  redis-data:
+  djl-cache:
+
+networks:
+  aura-net:
+    driver: bridge
