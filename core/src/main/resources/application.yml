@@ -1,0 +1,59 @@
+spring:
+  application:
+    name: aura-core
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/aura}
+    username: ${SPRING_DATASOURCE_USERNAME:aura}
+    password: ${SPRING_DATASOURCE_PASSWORD:aura}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 10000
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+  data:
+    redis:
+      host: ${AURA_REDIS_HOST:localhost}
+      port: ${AURA_REDIS_PORT:6379}
+
+server:
+  port: 8080
+  compression:
+    enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+
+aura:
+  jwt:
+    secret: ${AURA_JWT_SECRET:change-me-in-production-please-32chars}
+    issuer: aura
+    ttl-seconds: 86400
+  gemini:
+    api-key: ${AURA_GEMINI_API_KEY:}
+    fast-model: ${AURA_GEMINI_FAST_MODEL:gemini-2.0-flash}
+    reasoning-model: ${AURA_GEMINI_REASONING_MODEL:gemini-2.0-pro}
+    timeout-seconds: 45
+  embeddings:
+    model-id: sentence-transformers/all-MiniLM-L6-v2
+    dimensions: 384
+  rag:
+    top-k: 6
+    min-score: 0.25
+  orchestrator:
+    qa-min-score: 0.7
+    escalation-threshold: 0.35
+
+logging:
+  level:
+    com.aura: INFO
+    dev.langchain4j: WARN
+    org.hibernate.SQL: WARN
